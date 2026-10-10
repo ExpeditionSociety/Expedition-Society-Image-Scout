@@ -1,0 +1,4 @@
+import {createServer} from 'node:http';import {readFile} from 'node:fs/promises';import {resolve,extname} from 'node:path';import handler from './api/scout.js';
+try{process.loadEnvFile('.env');}catch{}
+const root=resolve('public');
+createServer(async(req,res)=>{if(req.url.split('?')[0]==='/api/scout')return handler(req,res);const url=new URL(req.url,'http://localhost');const path=resolve(root,'.'+decodeURIComponent(url.pathname==='/'?'/index.html':url.pathname));if(!path.startsWith(root+'/')){res.writeHead(403);return res.end();}try{const bytes=await readFile(path);res.setHeader('Content-Type',({'.html':'text/html','.css':'text/css','.js':'text/javascript','.svg':'image/svg+xml','.csv':'text/csv'})[extname(path)]||'application/octet-stream');res.end(bytes);}catch{res.writeHead(404);res.end('Not found');}}).listen(3000,()=>console.log('Image Scout at http://localhost:3000'));
