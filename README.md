@@ -4,7 +4,7 @@ A private, mobile-friendly editorial desk for finding images, learning from past
 
 ## Included in v0.2
 
-- Live, on-demand image discovery from Wikimedia Commons and the Library of Congress. Searches retain image URL, original source, creator and available rights metadata.
+- Live, on-demand image discovery across seven sources: Wikimedia Commons, Library of Congress, Internet Archive, NASA Image Library, the Metropolitan Museum of Art, Art Institute of Chicago, and Cleveland Museum of Art. Search all sources together or choose one; partial outages preserve results from the other sources. Searches retain image URL, original source, creator and available rights metadata.
 - Manual image/source links; duplicate searches preserve previous decisions.
 - Private owner sign-in using Supabase Auth, HttpOnly cookies and per-user row-level security. No service-role key required.
 - Approve, reject, later, and return-to-queue controls with persistent decisions.
@@ -99,9 +99,9 @@ This is an MVP implementation, not a trained Instagram performance model. Engage
 
 Source metadata is preserved as a rights note, not a permission guarantee. Library of Congress item-specific rights are not retrieved automatically; open the source item's Rights & Access section. Wikimedia creator text and license name/link are retained, but exact required attribution should be copied from the source. Discovered images stay at their original URLs; uploaded seed images are stored privately. No reposting is automated. External images can disappear, refuse embedding, or be unsuitable for the vision model.
 
-Not yet included: recurring autonomous scouting, Pinterest/Flickr/museum/general-web adapters, automatic Meta history ingestion, durable image mirrors, native visual embeddings, scheduled posts, publishing to Instagram, or a separate provenance-confidence model. No Meta or Pinterest credentials are needed for this release.
+Not yet included: recurring autonomous scouting, Pinterest/Flickr/general-web adapters, automatic Meta history ingestion, durable image mirrors, native visual embeddings, scheduled posts, publishing to Instagram, or a separate provenance-confidence model. No Meta or Pinterest credentials are needed for this release.
 
-Validation: 18 automated checks pass, and the static build succeeds. Visual browser QA could not run in the build environment because the browser download failed.
+Validation: 23 automated checks pass, and the static build succeeds. Visual browser QA could not run in the build environment because the browser download failed.
 
 Live OpenAI, Supabase and Vercel deployment require external credentials and must be smoke-tested after connection; archive adapters also need a live smoke test. Automated tests mock those APIs and cannot prove a deployed project's schema or provider configuration. Repository access alone does not create projects, provision secrets, or apply migrations.
 
@@ -115,3 +115,19 @@ Live OpenAI, Supabase and Vercel deployment require external credentials and mus
 - https://developers.openai.com/api/docs/guides/embeddings
 - https://www.mediawiki.org/wiki/API:Imageinfo
 - https://www.loc.gov/apis/json-and-yaml/requests/
+
+## Expanded sourcing
+
+No extra API keys or schema migrations are needed for these seven adapters. The Met, Art Institute and Cleveland adapters accept only records explicitly marked public domain or CC0. NASA media notes are not a blanket public-domain claim. Internet Archive results are item previews (including book/magazine covers); open the original item for full-resolution files and item-specific rights.
+
+Each search requests at most 12 candidates per source. An all-source search can return up to 84 before deduplication. An empty match count differs from an unavailable source; both are shown below the search controls. The old `both` API selector remains compatible with the original two archives.
+
+Additional primary API documentation:
+
+- https://archive.org/developers/
+- https://images.nasa.gov/docs/images.nasa.gov_api_docs.pdf
+- https://metmuseum.github.io/
+- https://api.artic.edu/docs/
+- https://openaccess-api.clevelandart.org/
+
+Live verification: NASA, Internet Archive, the Met, Art Institute of Chicago and Cleveland returned real images during development. Openverse was evaluated but excluded because its anti-bot challenge rejected server requests. No challenge bypass is implemented.

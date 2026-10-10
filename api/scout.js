@@ -1,7 +1,7 @@
 import {candidate,historyRow,parseCSV,fail,statuses,finalScores,seedRating} from '../lib/core.mjs';
 import {uploadSeed} from '../lib/uploads.mjs';
 import {config,supa,analyze,signSeeds} from '../lib/services.mjs';
-import {discover} from '../lib/sources.mjs';
+import {discover,availableSources} from '../lib/sources.mjs';
 const cookies=req=>Object.fromEntries((req.headers.cookie||'').split(';').map(x=>x.trim().split('=' )).filter(x=>x.length===2));
 function session(res,data){const secure=process.env.NODE_ENV==='production'||!!process.env.VERCEL; const attrs=`; HttpOnly; SameSite=Strict; Path=/${secure?'; Secure':''}`;res.setHeader('Set-Cookie',[`scout_access=${data.access_token||''}; Max-Age=${data.expires_in||0}${attrs}`,`scout_refresh=${data.refresh_token||''}; Max-Age=${data.refresh_token?2592000:0}${attrs}`]);}
 async function bodyOf(req){if(req.body){const b=typeof req.body==='string'?req.body:JSON.stringify(req.body);if(Buffer.byteLength(b)>3800000)throw fail('Request too large.',413);try{return typeof req.body==='string'?JSON.parse(b):req.body;}catch{throw fail('Invalid JSON.');}}let raw='';for await(const chunk of req){raw+=chunk;if(Buffer.byteLength(raw)>3800000)throw fail('Request too large.',413);}try{return raw?JSON.parse(raw):{};}catch{throw fail('Invalid JSON.');}}
@@ -13,7 +13,7 @@ export default async function handler(req,res){
  const origin=req.headers.origin;const expected=process.env.APP_ORIGIN||(!process.env.VERCEL?'http://localhost:3000':null);
  if(!expected||origin!==expected)throw fail('Request origin denied. Set APP_ORIGIN to this site URL.',403);
  const b=await bodyOf(req);const c=config();const ready=!!(c.url&&c.key&&c.owner);
- if(b.action==='health')return send(200,{ready,ai:!!c.openai});
+ if(b.action==='health')return send(200,{ready,ai:!!c.openai,sources:availableSources()});
  if(!ready)throw fail('Connect Supabase and set OWNER_EMAIL in Vercel before signing in.',503);
  if(b.action==='logout'){session(res,{});return send(200,{ok:true});}
  if(b.action==='login'){
@@ -27,9 +27,9 @@ export default async function handler(req,res){
  const db=(path,opts)=>supa('/rest/v1/'+path,token,opts); const insertHeaders={Prefer:'return=representation,resolution=merge-duplicates'};
  if(b.action==='session')return send(200,{email:user.email});
  if(b.action==='list'){const [items,history]=await Promise.all([db('scout_items?select=id,title,image_url,source_url,source,creator,license,license_url,query,status,analysis,scores,created_at&order=created_at.desc&limit=300'),db('scout_history?select=id,title,image_url,source_url,caption,likes,comments,saves,reach,rating,storage_path,analysis,created_at&order=created_at.desc&limit=200')]);return send(200,{items,history:await signSeeds(history,token)});}
- if(b.action==='discover'){const q=String(b.query||'').trim().slice(0,200);if(q.length<3)throw fail('Enter at least three characters.');const found=await discover(q,b.source||'both');if(!found.items.length)return send(200,{added:0,warnings:found.warnings});
+ if(b.action==='discover'){const q=String(b.query||'').trim().slice(0,200);if(q.length<3)throw fail('Enter at least three characters.');const found=await discover(q,b.source||'all');if(!found.items.length)return send(200,{added:0,warnings:found.warnings,source_results:found.source_results});
  // Ignore duplicates to preserve human decisions and earlier analysis.
- const saved=await db('scout_items?on_conflict=owner_id,image_url',{method:'POST',headers:{Prefer:'return=representation,resolution=ignore-duplicates'},body:found.items.map(x=>({...x,owner_id:user.id}))});return send(200,{added:saved.length,warnings:found.warnings});}
+ const saved=await db('scout_items?on_conflict=owner_id,image_url',{method:'POST',headers:{Prefer:'return=representation,resolution=ignore-duplicates'},body:found.items.map(x=>({...x,owner_id:user.id}))});return send(200,{added:saved.length,warnings:found.warnings,source_results:found.source_results});}
  if(b.action==='add'){const saved=await db('scout_items?on_conflict=owner_id,image_url',{method:'POST',headers:{Prefer:'return=representation,resolution=ignore-duplicates'},body:{...candidate(b.item),owner_id:user.id}});return send(200,{added:saved.length});}
  if(b.action==='upload-seed'){const row=await uploadSeed(b.item||{},user,token);const saved=await db('scout_history?on_conflict=owner_id,image_url',{method:'POST',headers:{Prefer:'return=representation,resolution=ignore-duplicates'},body:row});return send(200,{added:saved.length});}
  if(b.action==='rate'){if(!/^[\da-f-]{36}$/i.test(b.id||''))throw fail('Invalid image ID.');const rating=seedRating(b.rating);if(!rating)throw fail('Select a rating.');const rows=await db(`scout_history?id=eq.${b.id}`,{method:'PATCH',headers:insertHeaders,body:{rating}});if(!rows.length)throw fail('Seed image not found.',404);return send(200,{ok:true});}
