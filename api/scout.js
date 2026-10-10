@@ -1,3 +1,4 @@
+import {researchStory,researchQuery,sameQuestion,updateAnalysis} from '../lib/research.mjs';
 import {candidate,historyRow,parseCSV,fail,statuses,finalScores,seedRating} from '../lib/core.mjs';
 import {uploadSeed} from '../lib/uploads.mjs';
 import {config,supa,analyze,signSeeds} from '../lib/services.mjs';
@@ -13,7 +14,7 @@ export default async function handler(req,res){
  const origin=req.headers.origin;const expected=process.env.APP_ORIGIN||(!process.env.VERCEL?'http://localhost:3000':null);
  if(!expected||origin!==expected)throw fail('Request origin denied. Set APP_ORIGIN to this site URL.',403);
  const b=await bodyOf(req);const c=config();const ready=!!(c.url&&c.key&&c.owner);
- if(b.action==='health')return send(200,{ready,ai:!!c.openai,sources:availableSources()});
+ if(b.action==='health')return send(200,{ready,ai:!!c.openai,sources:availableSources(),research:true});
  if(!ready)throw fail('Connect Supabase and set OWNER_EMAIL in Vercel before signing in.',503);
  if(b.action==='logout'){session(res,{});return send(200,{ok:true});}
  if(b.action==='login'){
@@ -35,10 +36,25 @@ export default async function handler(req,res){
  if(b.action==='rate'){if(!/^[\da-f-]{36}$/i.test(b.id||''))throw fail('Invalid image ID.');const rating=seedRating(b.rating);if(!rating)throw fail('Select a rating.');const rows=await db(`scout_history?id=eq.${b.id}`,{method:'PATCH',headers:insertHeaders,body:{rating}});if(!rows.length)throw fail('Seed image not found.',404);return send(200,{ok:true});}
  if(b.action==='import'){const rows=b.csv!==undefined?parseCSV(String(b.csv)):[historyRow(b.item||{})];if(!rows.length)throw fail('No rows to import.');const saved=await db('scout_history?on_conflict=owner_id,image_url',{method:'POST',headers:{Prefer:'return=representation,resolution=ignore-duplicates'},body:rows.map(x=>({...x,owner_id:user.id}))});return send(200,{added:saved.length});}
  if(b.action==='feedback'){if(!statuses.includes(b.status))throw fail('Invalid review action.');if(!/^[\da-f-]{36}$/i.test(b.id||''))throw fail('Invalid image ID.');const result=await db(`scout_items?id=eq.${b.id}`,{method:'PATCH',headers:insertHeaders,body:{status:b.status,reviewed_at:new Date().toISOString()}});if(!result.length)throw fail('Image not found.',404);return send(200,{ok:true});}
+ if(b.action==='research'){
+ if(!/^[\da-f-]{36}$/i.test(b.id||''))throw fail('Invalid image ID.');
+ if(b.kind&&!['candidate','history'].includes(b.kind))throw fail('Invalid image type.');
+ const table=b.kind==='history'?'scout_history':'scout_items';
+ const [item]=await db(`${table}?id=eq.${b.id}&select=*&limit=1`);if(!item)throw fail('Image not found.',404);
+ const query=researchQuery(b.query,item);
+ const cached=(item.analysis?.research||[]).find(x=>sameQuestion(x.query,query));
+ if(cached)return send(200,{research:cached,cached:true});
+ if(!c.openai)throw fail('Add OPENAI_API_KEY in Vercel to enable story research.',503);
+ const limit=Number(process.env.DAILY_ANALYSIS_LIMIT||30);if(!Number.isInteger(limit)||limit<1||limit>1000)throw fail('Invalid daily analysis limit.',503);
+ if(!await db('rpc/reserve_analysis',{method:'POST',body:{daily_limit:limit}}))throw fail('Daily AI limit reached. Research and image analysis share this limit. Try tomorrow.',429);
+ const research=await researchStory(item,query);
+ const saved=await updateAnalysis(db,table,b.id,previous=>({analysis:{...previous,research:[research,...(previous.research||[]).filter(x=>!sameQuestion(x.query,query))]}}));
+ return send(200,{research:saved.analysis.research.find(x=>sameQuestion(x.query,query)),cached:false});
+ }
  if(b.action==='analyze'){
  if(!c.openai)throw fail('Add OPENAI_API_KEY in Vercel to enable analysis.',503);
  const table=b.kind==='history'?'scout_history':'scout_items';if(!/^[\da-f-]{36}$/i.test(b.id||''))throw fail('Invalid image ID.');const [item]=await db(`${table}?id=eq.${b.id}&select=*&limit=1`);if(!item)throw fail('Image not found.',404);
- if(item.analysis&&!b.reanalyze)return send(200,{cached:true});
+ if(item.analysis?.description&&!b.reanalyze)return send(200,{cached:true});
  const limit=Number(process.env.DAILY_ANALYSIS_LIMIT||30);if(!Number.isInteger(limit)||limit<1||limit>1000)throw fail('Invalid daily analysis limit.',503);
  const budget=await db('rpc/reserve_analysis',{method:'POST',body:{daily_limit:limit}});if(!budget)throw fail('Daily analysis limit reached. Try tomorrow.',429);
  const [history,feedback]=await Promise.all([db('scout_history?select=title,caption,analysis,likes,saves,reach,rating&analysis=not.is.null&order=created_at.desc&limit=30'),db('scout_items?select=title,status,analysis&analysis=not.is.null&status=in.(approved,rejected)&order=reviewed_at.desc&limit=20')]);
@@ -46,7 +62,7 @@ export default async function handler(req,res){
  const result=await analyze(visibleItem,[...history.map(x=>({...x,kind:'history'})),...feedback]);
  const matches=await db('rpc/match_scout',{method:'POST',body:{query_embedding:JSON.stringify(result.embedding),exclude_id:item.id}});
  const scores=finalScores(result.analysis,matches||[]);
- await db(`${table}?id=eq.${b.id}`,{method:'PATCH',body:{analysis:result.analysis,embedding:JSON.stringify(result.embedding),...(table==='scout_items'?{scores}: {})}});return send(200,{analysis:result.analysis,scores});
+ await updateAnalysis(db,table,b.id,previous=>({analysis:{...result.analysis,...(previous.research?{research:previous.research}:{})},embedding:JSON.stringify(result.embedding),...(table==='scout_items'?{scores}: {})}));return send(200,{analysis:result.analysis,scores});
  }
  throw fail('Unknown action.');
  }catch(e){const status=e.status|| (e.name==='TimeoutError'?504:500);send(status,{error:status===500?'Unexpected error. Please try again.':e.message});}

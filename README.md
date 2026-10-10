@@ -2,7 +2,7 @@
 
 A private, mobile-friendly editorial desk for finding images, learning from past Instagram posts, and curating a queue for Expedition Society Journal.
 
-## Included in v0.2
+## Included in v0.4
 
 - Live, on-demand image discovery across seven sources: Wikimedia Commons, Library of Congress, Internet Archive, NASA Image Library, the Metropolitan Museum of Art, Art Institute of Chicago, and Cleveland Museum of Art. Search all sources together or choose one; partial outages preserve results from the other sources. Searches retain image URL, original source, creator and available rights metadata.
 - Manual image/source links; duplicate searches preserve previous decisions.
@@ -11,8 +11,9 @@ A private, mobile-friendly editorial desk for finding images, learning from past
 - Private seed-image uploads from your phone, labeled Excellent / Good / Average / Poor. Images are resized in your browser and stored in a private Supabase bucket.
 - Optional CSV import of up to 200 historical Instagram posts with ratings, likes, comments, saves and reach.
 - Requested OpenAI image analysis, structured editorial scores and related search queries.
+- Story research beside each image: on-demand web search, clickable inline citations, source links, and briefs automatically saved with that image. Each suggested thread offers Find images or Research story.
 - pgvector matching of **AI visual descriptions**, not native image embeddings. Excellent/Good seeds and approved images form positive references; Poor seeds and rejected images guide future analysis and reduce similarity scores. Average seeds are neutral.
-- Atomically limited daily AI analysis attempts (default 30). Import and archive searches make no paid AI calls. Failed analysis attempts also consume the daily allowance.
+- Atomically limited daily image analysis and story research attempts (default 30). Import and archive searches make no paid AI calls. Failed AI attempts also consume the daily allowance.
 - Example workspace with clearly labeled local illustrations and simulated scores; example review decisions are stored only in the current browser tab.
 
 ## What Jamie needs to provide
@@ -64,6 +65,7 @@ Add these environment variables for Production:
 | `APP_ORIGIN` | Exact deployed origin, e.g. `https://image-scout.vercel.app`, no trailing slash |
 | `DAILY_ANALYSIS_LIMIT` | Optional; default `30` |
 | `OPENAI_VISION_MODEL` | Optional; default `gpt-4.1-mini` |
+| `OPENAI_RESEARCH_MODEL` | Optional; default `gpt-4.1-mini`; must support the Responses API `web_search` tool |
 | `OPENAI_EMBEDDING_MODEL` | Optional; default `text-embedding-3-small`; must support 1536 dimensions |
 
 If you do not know the Vercel URL until first deploy, add `APP_ORIGIN` after that deploy and redeploy. State-changing calls require an exact same-origin match. Preview deployments need their own exact `APP_ORIGIN`; with a production-only origin they deliberately cannot use the live backend.
@@ -75,7 +77,9 @@ If you do not know the Vercel URL until first deploy, add `APP_ORIGIN` after tha
 - For CSV imports, `image_url` must be a direct HTTPS JPG/PNG/WEBP image URL reachable by OpenAI. An Instagram post page is not an image URL. Expiring Instagram CDN links are fragile; use durable links to copies of your own images. Keep the Instagram post link in `post_url`.
 - Analyze imported images individually. Importing an image does not analyze it automatically.
 - Search a subject, inspect source information, then analyze promising finds and approve, save or reject them.
-- In details, related queries fill the scout search box. Press Scout images to explore the next thread.
+- In details, each thread offers Find images (fills the archive search box) or Research story (searches the web). You can also type your own question in the research panel before analyzing the image.
+- Research saves automatically with the image and remains available when you reopen it, including in Approved or Saved for later. Repeating the same question opens the saved brief without another paid call. Follow-up questions create additional saved briefs.
+- Research uses the existing OpenAI key and shares DAILY_ANALYSIS_LIMIT with visual analysis. No additional database migration is needed.
 
 ## Local development and checks
 
@@ -99,9 +103,9 @@ This is an MVP implementation, not a trained Instagram performance model. Engage
 
 Source metadata is preserved as a rights note, not a permission guarantee. Library of Congress item-specific rights are not retrieved automatically; open the source item's Rights & Access section. Wikimedia creator text and license name/link are retained, but exact required attribution should be copied from the source. Discovered images stay at their original URLs; uploaded seed images are stored privately. No reposting is automated. External images can disappear, refuse embedding, or be unsuitable for the vision model.
 
-Not yet included: recurring autonomous scouting, Pinterest/Flickr/general-web adapters, automatic Meta history ingestion, durable image mirrors, native visual embeddings, scheduled posts, publishing to Instagram, or a separate provenance-confidence model. No Meta or Pinterest credentials are needed for this release.
+Not yet included: recurring autonomous scouting, Pinterest/Flickr/general-web image adapters, automatic Meta history ingestion, durable image mirrors, native visual embeddings, scheduled posts, publishing to Instagram, or a separate provenance-confidence model. No Meta or Pinterest credentials are needed for this release.
 
-Validation: 23 automated checks pass, and the static build succeeds. Visual browser QA could not run in the build environment because the browser download failed.
+Validation: 32 automated checks pass, and the static build succeeds. DOM interaction checks also passed for research submission, citations, reopening briefs, failure preservation, related-image search and research before analysis. Visual browser QA could not run because the browser download failed.
 
 Live OpenAI, Supabase and Vercel deployment require external credentials and must be smoke-tested after connection; archive adapters also need a live smoke test. Automated tests mock those APIs and cannot prove a deployed project's schema or provider configuration. Repository access alone does not create projects, provision secrets, or apply migrations.
 
@@ -113,6 +117,7 @@ Live OpenAI, Supabase and Vercel deployment require external credentials and mus
 - https://supabase.com/docs/reference/cli/supabase-db-push
 - https://developers.openai.com/api/docs/guides/images-vision
 - https://developers.openai.com/api/docs/guides/embeddings
+- https://developers.openai.com/api/docs/guides/tools-web-search
 - https://www.mediawiki.org/wiki/API:Imageinfo
 - https://www.loc.gov/apis/json-and-yaml/requests/
 
@@ -131,3 +136,11 @@ Additional primary API documentation:
 - https://openaccess-api.clevelandart.org/
 
 Live verification: NASA, Internet Archive, the Met, Art Institute of Chicago and Cleveland returned real images during development. Openverse was evaluated but excluded because its anti-bot challenge rejected server requests. No challenge bypass is implemented.
+
+## Story research
+
+Research uses the Responses API with `web_search` required, a 90-second provider timeout, and up to 1,800 output tokens. It sends the image title, public source record URL, creator and any supplied caption as untrusted context; it does not send private image URLs, ratings or engagement metrics. Briefs distinguish the specific image from broader context and unresolved leads. The server requires completed search plus citation annotations before saving; a failed or uncited response leaves existing data intact. Citations are rendered as escaped text with validated HTTP(S) links.
+
+Briefs are stored inside the existing `analysis.research` JSON field, protected by the same owner RLS. Research can exist before visual analysis. Compare-and-set writes preserve concurrent research and analysis updates. Cached questions do not consume the daily allowance. New research attempts do, including failed attempts. The existing 180-second Vercel function limit accommodates the research request.
+
+Research tests cover source citations, failed/uncited results, owner authentication, the shared budget, cached requests, escaping, research-only images and concurrent JSON updates. Paid OpenAI calls are mocked in the automated suite; live authenticated research still depends on the deployed account's API access and available usage.
