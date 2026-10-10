@@ -2,9 +2,11 @@
 
 A private, mobile-friendly editorial desk for finding images, learning from past Instagram posts, and curating a queue for Expedition Society Journal.
 
-## Included in v0.4
+## Included in v0.5
 
 - Live, on-demand image discovery across seven sources: Wikimedia Commons, Library of Congress, Internet Archive, NASA Image Library, the Metropolitan Museum of Art, Art Institute of Chicago, and Cleveland Museum of Art. Search all sources together or choose one; partial outages preserve results from the other sources. Searches retain image URL, original source, creator and available rights metadata.
+- Copyright-free source-menu mode filters explicit public-domain/CC0 metadata across Wikimedia Commons, Internet Archive and the three museum adapters. Flickr and Pinterest options open searches on those sites in a new tab.
+- Select individual queue entries or Select all, then delete in one confirmed batch. Per-card Delete is also available. Only pending queue entries can be deleted.
 - Manual image/source links; duplicate searches preserve previous decisions.
 - Private owner sign-in using Supabase Auth, HttpOnly cookies and per-user row-level security. No service-role key required.
 - Approve, reject, later, and return-to-queue controls with persistent decisions.
@@ -103,9 +105,9 @@ This is an MVP implementation, not a trained Instagram performance model. Engage
 
 Source metadata is preserved as a rights note, not a permission guarantee. Library of Congress item-specific rights are not retrieved automatically; open the source item's Rights & Access section. Wikimedia creator text and license name/link are retained, but exact required attribution should be copied from the source. Discovered images stay at their original URLs; uploaded seed images are stored privately. No reposting is automated. External images can disappear, refuse embedding, or be unsuitable for the vision model.
 
-Not yet included: recurring autonomous scouting, Pinterest/Flickr/general-web image adapters, automatic Meta history ingestion, durable image mirrors, native visual embeddings, scheduled posts, publishing to Instagram, or a separate provenance-confidence model. No Meta or Pinterest credentials are needed for this release.
+Not yet included: recurring autonomous scouting, automatic Pinterest/Flickr/general-web image import adapters, automatic Meta history ingestion, durable image mirrors, native visual embeddings, scheduled posts, publishing to Instagram, or a separate provenance-confidence model. No Meta or Pinterest credentials are needed for this release.
 
-Validation: 32 automated checks pass, and the static build succeeds. DOM interaction checks also passed for research submission, citations, reopening briefs, failure preservation, related-image search and research before analysis. Visual browser QA could not run because the browser download failed.
+Validation: 37 automated checks pass, and the static build succeeds. DOM interaction checks also passed for research submission, citations, reopening briefs, failure preservation, related-image search and research before analysis. Visual browser QA could not run because the browser download failed.
 
 Live OpenAI, Supabase and Vercel deployment require external credentials and must be smoke-tested after connection; archive adapters also need a live smoke test. Automated tests mock those APIs and cannot prove a deployed project's schema or provider configuration. Repository access alone does not create projects, provision secrets, or apply migrations.
 
@@ -144,3 +146,13 @@ Research uses the Responses API with `web_search` required, a 90-second provider
 Briefs are stored inside the existing `analysis.research` JSON field, protected by the same owner RLS. Research can exist before visual analysis. Compare-and-set writes preserve concurrent research and analysis updates. Cached questions do not consume the daily allowance. New research attempts do, including failed attempts. The existing 180-second Vercel function limit accommodates the research request.
 
 Research tests cover source citations, failed/uncited results, owner authentication, the shared budget, cached requests, escaping, research-only images and concurrent JSON updates. Paid OpenAI calls are mocked in the automated suite; live authenticated research still depends on the deployed account's API access and available usage.
+
+## Source modes and queue cleanup
+
+Choose Copyright-free · Public domain / CC0 in the source menu to search five adapters and retain only explicit public-domain labels, CC0 labels, or Creative Commons public-domain Mark/Zero URLs. Attribution licenses, unknown rights and vague "no known restrictions" notes are excluded. Library of Congress and NASA are excluded from this mode because those adapters do not retrieve explicit item-level public-domain/CC0 metadata. These are source-reported classifications, not an independent copyright determination. A live sailing query returned 27 qualifying images during this update.
+
+Flickr and Pinterest launch their own search pages with an encoded query. They do not automatically import results or establish reuse rights. Use Add image with a direct image URL and its original source record to keep a find. No extra API keys or migrations are required.
+
+Queue selection includes only the currently loaded pending entries (up to 300). Delete selected opens one confirmation showing the count and stating that entries and their saved research will be permanently removed. The server validates all IDs before writes, requires the owner session, and filters both owner and pending status. Deletes use chunks of at most 50 IDs to keep request URLs bounded. Partial failures report the completed IDs and keep remaining selections available for retry. Approved entries, taste history and rejected feedback cannot be deleted through this queue endpoint. Deleting a queue entry allows it to be found again in a later archive search.
+
+Additional UI interaction checks covered select all, cancellation, batch and individual deletion, partial and total failures, the new search mode, and external search navigation. External navigation URL construction was verified; the third-party search pages could not be inspected by the research tool.

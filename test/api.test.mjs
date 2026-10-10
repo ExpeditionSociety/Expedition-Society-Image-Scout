@@ -71,3 +71,24 @@ test('uncited or failed web research cannot overwrite saved image data',async()=
  };
  try{const r=await call({action:'research',id:owner});assert.equal(r.statusCode,502);assert.match(r.body.error,/No cited findings/);assert.equal(writes,0);}finally{global.fetch=old;}
 });
+
+test('bulk delete targets only selected pending rows owned by the signed-in user',async()=>{
+ const old=global.fetch;let deletion;global.fetch=async(u,o)=>{
+  if(u.endsWith('/auth/v1/user'))return json({id:owner,email:'owner@example.org'});
+  deletion={url:u,options:o};return json([{id:owner}]);
+ };
+ try{const r=await call({action:'delete',ids:[owner,owner]});assert.equal(r.statusCode,200);assert.equal(r.body.deleted,1);assert.equal(deletion.options.method,'DELETE');assert.ok(deletion.url.includes(`id=in.(${owner})`));assert.ok(deletion.url.includes('status=eq.pending'));assert.ok(deletion.url.includes(`owner_id=eq.${owner}`));assert.equal(deletion.options.headers.Authorization,'Bearer valid');}finally{global.fetch=old;}
+});
+test('bulk delete rejects empty, malformed and oversized lists before writing',async()=>{
+ const old=global.fetch;let writes=0;global.fetch=async(u,o)=>{if(o.method==='DELETE')writes++;return json({id:owner,email:'owner@example.org'});};
+ try{for(const ids of [[],['bad'],[owner,'bad'],Array(301).fill(owner),null])assert.equal((await call({action:'delete',ids})).statusCode,400);assert.equal(writes,0);assert.equal((await call({action:'delete',ids:[owner]},{cookie:''})).statusCode,401);}finally{global.fetch=old;}
+});
+
+test('large deletions use bounded requests and report partial failure without losing remaining selections',async()=>{
+ const old=global.fetch;const ids=Array.from({length:120},(_,i)=>`00000000-0000-4000-8000-${String(i).padStart(12,'0')}`);let chunks=0;
+ global.fetch=async(u,o)=>{
+  if(u.endsWith('/auth/v1/user'))return json({id:owner,email:'owner@example.org'});
+  chunks++;const selected=u.match(/id=in\.\(([^)]+)\)/)[1].split(',');assert.ok(selected.length<=50);assert.ok(u.length<2400);if(chunks===2)return json({},503);return json(selected.map(id=>({id})));
+ };
+ try{const r=await call({action:'delete',ids});assert.equal(r.statusCode,200);assert.equal(r.body.deleted,50);assert.equal(r.body.ids.length,50);assert.ok(r.body.warning);assert.equal(chunks,2);}finally{global.fetch=old;}
+});

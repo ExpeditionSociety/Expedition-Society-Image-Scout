@@ -14,7 +14,7 @@ export default async function handler(req,res){
  const origin=req.headers.origin;const expected=process.env.APP_ORIGIN||(!process.env.VERCEL?'http://localhost:3000':null);
  if(!expected||origin!==expected)throw fail('Request origin denied. Set APP_ORIGIN to this site URL.',403);
  const b=await bodyOf(req);const c=config();const ready=!!(c.url&&c.key&&c.owner);
- if(b.action==='health')return send(200,{ready,ai:!!c.openai,sources:availableSources(),research:true});
+ if(b.action==='health')return send(200,{ready,ai:!!c.openai,sources:availableSources(),research:true,queue_delete:true});
  if(!ready)throw fail('Connect Supabase and set OWNER_EMAIL in Vercel before signing in.',503);
  if(b.action==='logout'){session(res,{});return send(200,{ok:true});}
  if(b.action==='login'){
@@ -35,6 +35,16 @@ export default async function handler(req,res){
  if(b.action==='upload-seed'){const row=await uploadSeed(b.item||{},user,token);const saved=await db('scout_history?on_conflict=owner_id,image_url',{method:'POST',headers:{Prefer:'return=representation,resolution=ignore-duplicates'},body:row});return send(200,{added:saved.length});}
  if(b.action==='rate'){if(!/^[\da-f-]{36}$/i.test(b.id||''))throw fail('Invalid image ID.');const rating=seedRating(b.rating);if(!rating)throw fail('Select a rating.');const rows=await db(`scout_history?id=eq.${b.id}`,{method:'PATCH',headers:insertHeaders,body:{rating}});if(!rows.length)throw fail('Seed image not found.',404);return send(200,{ok:true});}
  if(b.action==='import'){const rows=b.csv!==undefined?parseCSV(String(b.csv)):[historyRow(b.item||{})];if(!rows.length)throw fail('No rows to import.');const saved=await db('scout_history?on_conflict=owner_id,image_url',{method:'POST',headers:{Prefer:'return=representation,resolution=ignore-duplicates'},body:rows.map(x=>({...x,owner_id:user.id}))});return send(200,{added:saved.length});}
+ if(b.action==='delete'){
+ if(!Array.isArray(b.ids)||!b.ids.length||b.ids.length>300||b.ids.some(id=>typeof id!=='string'||!/^[\da-f-]{36}$/i.test(id)))throw fail('Select between 1 and 300 valid queue images.');
+ const ids=[...new Set(b.ids)];
+ const deleted=[];let warning;
+ for(let i=0;i<ids.length;i+=50){
+  try{const rows=await db(`scout_items?id=in.(${ids.slice(i,i+50).join(',')})&status=eq.pending&owner_id=eq.${user.id}`,{method:'DELETE',headers:{Prefer:'return=representation'}});deleted.push(...rows.map(x=>x.id));}
+  catch(e){if(!deleted.length)throw e;warning='Some images could not be deleted. Remaining selections are kept; try again.';break;}
+ }
+ return send(200,{deleted:deleted.length,ids:deleted,warning});
+ }
  if(b.action==='feedback'){if(!statuses.includes(b.status))throw fail('Invalid review action.');if(!/^[\da-f-]{36}$/i.test(b.id||''))throw fail('Invalid image ID.');const result=await db(`scout_items?id=eq.${b.id}`,{method:'PATCH',headers:insertHeaders,body:{status:b.status,reviewed_at:new Date().toISOString()}});if(!result.length)throw fail('Image not found.',404);return send(200,{ok:true});}
  if(b.action==='research'){
  if(!/^[\da-f-]{36}$/i.test(b.id||''))throw fail('Invalid image ID.');
